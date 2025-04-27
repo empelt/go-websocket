@@ -62,6 +62,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 
 		fmt.Printf("Received frame: opcode=%d, payload=%s\n", op, string(payload))
 
+		// closeフレームを受信した場合は、closeフレームを返して終了
+		if op == 0x8 {
+			fmt.Println("Received close frame, closing connection")
+			if err := writeCloseFrame(conn, 0x8, "bye"); err != nil {
+				fmt.Println("writeFrame error:", err)
+				return
+			}
+			return
+		}
+
 		if err := writeFrame(conn, op, payload); err != nil {
 			fmt.Println("writeFrame error:", err)
 			return
@@ -109,7 +119,11 @@ func readFrame(r *bufio.ReadWriter) (opcode byte, payload []byte, err error) {
 	masked := (header[1] & maskedBit) != 0
 	payloadLen := int(header[1] & 0x7F) // 0x7F = 01111111
 
-	fmt.Println("fin:", fin, "opcode:", opcode, "masked:", masked, "payloadLen:", payloadLen)
+	// opcodeは、0x0~0x7がテキストフレーム、0x8がcloseフレーム、0x9がpingフレーム、0xAがpongフレーム
+	// closeフレームを受信した場合は、ここで終了
+	if opcode == 0x8 {
+		return
+	}
 
 	if payloadLen == 126 {
 		ext := make([]byte, 2)
@@ -155,6 +169,16 @@ func readFrame(r *bufio.ReadWriter) (opcode byte, payload []byte, err error) {
 	}
 
 	return
+}
+
+func writeCloseFrame(w io.Writer, code int, reason string) error {
+	payload := make([]byte, 2+len(reason))
+	payload[0] = byte(code >> 8)
+	payload[1] = byte(code)
+
+	copy(payload[2:], reason)
+
+	return writeFrame(w, 0x8, payload)
 }
 
 func writeFrame(w io.Writer, opcode byte, payload []byte) error {
